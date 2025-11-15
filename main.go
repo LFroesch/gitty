@@ -1472,6 +1472,10 @@ type DiffInfo struct {
 	Imports      []string
 	HasTests     bool
 	HasDocs      bool
+	Variables    []string
+	Keywords     []string // bug, fix, error, validate, etc
+	Comments     []string
+	Context      string // What kind of change: api, validation, error-handling, etc
 }
 
 func getFileDiff(filePath string) DiffInfo {
@@ -1490,14 +1494,31 @@ func parseDiffOutput(diff string) DiffInfo {
 	info := DiffInfo{}
 	lines := strings.Split(diff, "\n")
 
+	// Keywords to look for that indicate specific types of changes
+	bugKeywords := []string{"bug", "fix", "error", "crash", "issue", "problem"}
+	validationKeywords := []string{"validate", "validation", "check", "verify", "sanitize"}
+	apiKeywords := []string{"endpoint", "route", "handler", "api", "request", "response"}
+	securityKeywords := []string{"auth", "security", "permission", "token", "encrypt"}
+	performanceKeywords := []string{"optimize", "performance", "cache", "speed", "efficient"}
+
+	contextCounts := make(map[string]int)
+
 	for _, line := range lines {
+		lineLower := strings.ToLower(line)
+
 		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
 			info.LinesAdded++
 
-			// Detect function definitions (enhanced patterns for multiple languages)
+			// Detect function definitions
 			funcName := extractFunctionName(line)
 			if funcName != "" && !contains(info.Functions, funcName) {
 				info.Functions = append(info.Functions, funcName)
+			}
+
+			// Detect variable names
+			varName := extractVariableName(line)
+			if varName != "" && !contains(info.Variables, varName) {
+				info.Variables = append(info.Variables, varName)
 			}
 
 			// Detect imports/includes
@@ -1508,8 +1529,60 @@ func parseDiffOutput(diff string) DiffInfo {
 				}
 			}
 
+			// Extract comments
+			comment := extractComment(line)
+			if comment != "" {
+				info.Comments = append(info.Comments, comment)
+			}
+
+			// Detect keywords and context
+			for _, keyword := range bugKeywords {
+				if strings.Contains(lineLower, keyword) {
+					if !contains(info.Keywords, keyword) {
+						info.Keywords = append(info.Keywords, keyword)
+					}
+					contextCounts["fix"]++
+				}
+			}
+
+			for _, keyword := range validationKeywords {
+				if strings.Contains(lineLower, keyword) {
+					if !contains(info.Keywords, keyword) {
+						info.Keywords = append(info.Keywords, keyword)
+					}
+					contextCounts["validation"]++
+				}
+			}
+
+			for _, keyword := range apiKeywords {
+				if strings.Contains(lineLower, keyword) {
+					if !contains(info.Keywords, keyword) {
+						info.Keywords = append(info.Keywords, keyword)
+					}
+					contextCounts["api"]++
+				}
+			}
+
+			for _, keyword := range securityKeywords {
+				if strings.Contains(lineLower, keyword) {
+					if !contains(info.Keywords, keyword) {
+						info.Keywords = append(info.Keywords, keyword)
+					}
+					contextCounts["security"]++
+				}
+			}
+
+			for _, keyword := range performanceKeywords {
+				if strings.Contains(lineLower, keyword) {
+					if !contains(info.Keywords, keyword) {
+						info.Keywords = append(info.Keywords, keyword)
+					}
+					contextCounts["performance"]++
+				}
+			}
+
 			// Detect test-related content
-			if strings.Contains(strings.ToLower(line), "test") {
+			if strings.Contains(lineLower, "test") {
 				info.HasTests = true
 			}
 
@@ -1523,6 +1596,17 @@ func parseDiffOutput(diff string) DiffInfo {
 		}
 	}
 
+	// Determine primary context based on what we found
+	maxContext := ""
+	maxCount := 0
+	for context, count := range contextCounts {
+		if count > maxCount {
+			maxCount = count
+			maxContext = context
+		}
+	}
+	info.Context = maxContext
+
 	return info
 }
 
@@ -1533,6 +1617,62 @@ func contains(slice []string, item string) bool {
 		}
 	}
 	return false
+}
+
+func extractVariableName(line string) string {
+	trimmed := strings.TrimSpace(line)
+	if strings.HasPrefix(trimmed, "+") {
+		trimmed = strings.TrimSpace(trimmed[1:])
+	}
+
+	// Look for variable declarations: var x, const x, let x, x :=, x =
+	patterns := []string{
+		`var\s+(\w+)`,
+		`const\s+(\w+)`,
+		`let\s+(\w+)`,
+		`(\w+)\s*:=`,
+		`(\w+)\s*=`,
+	}
+
+	for _, pattern := range patterns {
+		re := regexp.MustCompile(pattern)
+		matches := re.FindStringSubmatch(trimmed)
+		if len(matches) > 1 {
+			varName := matches[1]
+			// Filter out common noise
+			if len(varName) > 2 && varName != "err" && varName != "nil" && varName != "true" && varName != "false" {
+				return varName
+			}
+		}
+	}
+
+	return ""
+}
+
+func extractComment(line string) string {
+	trimmed := strings.TrimSpace(line)
+	if strings.HasPrefix(trimmed, "+") {
+		trimmed = strings.TrimSpace(trimmed[1:])
+	}
+
+	// Extract single-line comments
+	if strings.Contains(trimmed, "//") {
+		idx := strings.Index(trimmed, "//")
+		comment := strings.TrimSpace(trimmed[idx+2:])
+		if len(comment) > 5 {
+			return comment
+		}
+	}
+
+	// Extract Python/Ruby comments
+	if strings.HasPrefix(trimmed, "#") && !strings.HasPrefix(trimmed, "#include") {
+		comment := strings.TrimSpace(trimmed[1:])
+		if len(comment) > 5 {
+			return comment
+		}
+	}
+
+	return ""
 }
 
 func isImportLine(line string) bool {
@@ -1815,12 +1955,49 @@ func generateSmartCommitMessage(file, status string, diff DiffInfo, commitType s
 	dir := filepath.Dir(file)
 	dirName := filepath.Base(dir)
 
+	// Use comments if they're descriptive
+	if len(diff.Comments) > 0 {
+		firstComment := diff.Comments[0]
+		// If comment looks like a good description, use it
+		if len(firstComment) > 10 && len(firstComment) < 60 {
+			lowerComment := strings.ToLower(firstComment)
+			if strings.Contains(lowerComment, "fix") || strings.Contains(lowerComment, "add") ||
+				strings.Contains(lowerComment, "update") || strings.Contains(lowerComment, "remove") {
+				return firstComment
+			}
+		}
+	}
+
+	// Use context to create smarter messages
+	var contextPrefix string
+	switch diff.Context {
+	case "fix":
+		contextPrefix = "fix"
+		commitType = "fix" // Override type based on context
+	case "validation":
+		contextPrefix = "add validation for"
+	case "api":
+		contextPrefix = "add API endpoint for"
+	case "security":
+		contextPrefix = "improve security in"
+	case "performance":
+		contextPrefix = "optimize"
+	}
+
 	switch status {
 	case "A":
-		// New file messages
+		// New file messages with context
+		if contextPrefix != "" && len(diff.Functions) > 0 {
+			return fmt.Sprintf("%s %s", contextPrefix, diff.Functions[0])
+		}
+
 		if len(diff.Functions) > 0 {
 			if len(diff.Functions) == 1 {
-				return fmt.Sprintf("add %s function", diff.Functions[0])
+				// Use variable names to add context
+				if len(diff.Variables) > 0 && contains(diff.Keywords, "error") {
+					return fmt.Sprintf("add %s with error handling", diff.Functions[0])
+				}
+				return fmt.Sprintf("add %s", diff.Functions[0])
 			}
 			return fmt.Sprintf("add %s with %d functions", baseName, len(diff.Functions))
 		}
@@ -1851,6 +2028,30 @@ func generateSmartCommitMessage(file, status string, diff DiffInfo, commitType s
 		return fmt.Sprintf("remove %s", fileName)
 
 	case "M":
+		// Use context for much better messages
+		if contextPrefix != "" {
+			if len(diff.Functions) > 0 {
+				return fmt.Sprintf("%s %s", contextPrefix, diff.Functions[0])
+			}
+			return fmt.Sprintf("%s %s", contextPrefix, baseName)
+		}
+
+		// Check keywords for specific types of changes
+		if contains(diff.Keywords, "error") || contains(diff.Keywords, "bug") {
+			commitType = "fix"
+			if len(diff.Functions) > 0 {
+				return fmt.Sprintf("fix error handling in %s", diff.Functions[0])
+			}
+			return fmt.Sprintf("fix error handling in %s", baseName)
+		}
+
+		if contains(diff.Keywords, "validate") || contains(diff.Keywords, "check") {
+			if len(diff.Functions) > 0 {
+				return fmt.Sprintf("add validation to %s", diff.Functions[0])
+			}
+			return fmt.Sprintf("add input validation to %s", baseName)
+		}
+
 		// Modified file messages - be more specific
 		if commitType == "docs" {
 			if fileName == "README.md" {
@@ -1874,16 +2075,25 @@ func generateSmartCommitMessage(file, status string, diff DiffInfo, commitType s
 			return fmt.Sprintf("update %s config", baseName)
 		}
 
-		// Function-specific messages
+		// Function-specific messages with better context
 		if len(diff.Functions) > 0 {
 			if len(diff.Functions) == 1 {
 				funcName := diff.Functions[0]
-				if commitType == "fix" {
-					return fmt.Sprintf("fix %s function", funcName)
-				} else if commitType == "refactor" {
-					return fmt.Sprintf("refactor %s function", funcName)
+
+				// Use keywords to be more specific
+				if contains(diff.Keywords, "auth") || contains(diff.Keywords, "security") {
+					return fmt.Sprintf("improve security in %s", funcName)
 				}
-				return fmt.Sprintf("update %s function", funcName)
+				if contains(diff.Keywords, "optimize") || contains(diff.Keywords, "performance") {
+					return fmt.Sprintf("optimize %s", funcName)
+				}
+
+				if commitType == "fix" {
+					return fmt.Sprintf("fix %s", funcName)
+				} else if commitType == "refactor" {
+					return fmt.Sprintf("refactor %s", funcName)
+				}
+				return fmt.Sprintf("update %s", funcName)
 			} else if len(diff.Functions) <= 3 {
 				if commitType == "refactor" {
 					return fmt.Sprintf("refactor %d functions in %s", len(diff.Functions), baseName)
