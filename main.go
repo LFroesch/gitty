@@ -39,16 +39,35 @@ type GitStatus struct {
 	Behind        int
 }
 
+type Branch struct {
+	Name      string
+	IsCurrent bool
+	Upstream  string
+}
+
+type Commit struct {
+	Hash    string
+	Message string
+	Author  string
+	Date    string
+}
+
 type model struct {
-	state       string // "files", "suggestions", "custom", "edit", "output"
+	state       string // "files", "suggestions", "custom", "edit", "output", "branches", "history", "diff"
 	changes     []GitChange
 	suggestions []CommitSuggestion
 	gitState    GitStatus
+	branches    []Branch
+	commits     []Commit
+	diffContent string
 
 	filesTable       table.Model
 	suggestionsTable table.Model
+	branchesTable    table.Model
+	historyTable     table.Model
 	customInput      textinput.Model
 	editInput        textinput.Model
+	branchInput      textinput.Model
 
 	width        int
 	height       int
@@ -59,6 +78,7 @@ type model struct {
 	pushOutput       string
 	lastCommit       string
 	lastStatusUpdate time.Time
+	confirmAction    string // for confirmation dialogs
 }
 
 type statusMsg struct {
@@ -68,6 +88,9 @@ type statusMsg struct {
 type gitChangesMsg []GitChange
 type commitSuggestionsMsg []CommitSuggestion
 type gitStatusMsg GitStatus
+type branchesMsg []Branch
+type commitsMsg []Commit
+type diffMsg string
 type pushOutputMsg struct {
 	output string
 	commit string
@@ -153,8 +176,37 @@ func main() {
 
 	suggestionsTable.SetStyles(filesStyle) // Use same style
 
+	// Initialize branches table
+	branchesColumns := []table.Column{
+		{Title: "Current", Width: 8},
+		{Title: "Branch Name", Width: 40},
+		{Title: "Upstream", Width: 35},
+	}
+	branchesTable := table.New(
+		table.WithColumns(branchesColumns),
+		table.WithFocused(true),
+		table.WithHeight(10),
+	)
+	branchesTable.SetStyles(filesStyle)
+
+	// Initialize history table
+	historyColumns := []table.Column{
+		{Title: "Hash", Width: 10},
+		{Title: "Message", Width: 50},
+		{Title: "Author", Width: 20},
+		{Title: "Date", Width: 15},
+	}
+	historyTable := table.New(
+		table.WithColumns(historyColumns),
+		table.WithFocused(true),
+		table.WithHeight(10),
+	)
+	historyTable.SetStyles(filesStyle)
+
 	m.filesTable = filesTable
 	m.suggestionsTable = suggestionsTable
+	m.branchesTable = branchesTable
+	m.historyTable = historyTable
 
 	// Initialize custom input
 	m.customInput = textinput.New()
@@ -165,6 +217,11 @@ func main() {
 	m.editInput = textinput.New()
 	m.editInput.Placeholder = "Edit commit message..."
 	m.editInput.CharLimit = 200
+
+	// Initialize branch input
+	m.branchInput = textinput.New()
+	m.branchInput.Placeholder = "Enter new branch name..."
+	m.branchInput.CharLimit = 100
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
@@ -310,6 +367,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return m, nil
 
+	case branchesMsg:
+		m.branches = []Branch(msg)
+		m.updateBranchesTable()
+		m.statusMsg = fmt.Sprintf("📋 Loaded %d branches", len(m.branches))
+		m.statusExpiry = time.Now().Add(3 * time.Second)
+		return m, nil
+
+	case commitsMsg:
+		m.commits = []Commit(msg)
+		m.updateHistoryTable()
+		m.statusMsg = fmt.Sprintf("📜 Loaded %d commits", len(m.commits))
+		m.statusExpiry = time.Now().Add(3 * time.Second)
+		return m, nil
+
+	case diffMsg:
+		m.diffContent = string(msg)
+		m.state = "diff"
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -332,6 +408,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.editInput.Blur()
 				m.editInput.SetValue("")
 				m.state = "suggestions"
+			} else if m.state == "newbranch" {
+				m.branchInput.Blur()
+				m.branchInput.SetValue("")
+				m.state = "branches"
+			} else if m.state == "diff" {
+				m.state = "files"
 			}
 			return m, nil
 		}
@@ -346,6 +428,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						suggestion := m.suggestions[selectedIndex]
 						return m, m.commitWithMessage(suggestion.Message)
 					}
+				}
+			case "branches":
+				if len(m.branches) > 0 {
+					selectedIndex := m.branchesTable.Cursor()
+					if selectedIndex < len(m.branches) {
+						branch := m.branches[selectedIndex]
+						if !branch.IsCurrent {
+							return m, m.switchBranch(branch.Name)
+						}
+					}
+				}
+			case "newbranch":
+				if m.branchInput.Value() != "" {
+					branchName := m.branchInput.Value()
+					m.branchInput.SetValue("")
+					m.branchInput.Blur()
+					m.state = "branches"
+					return m, m.createBranch(branchName)
 				}
 			case "custom":
 				if m.customInput.Value() != "" {
@@ -393,9 +493,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Only handle other keys if NOT in text input mode
-		if m.state != "custom" && m.state != "edit" {
+		if m.state != "custom" && m.state != "edit" && m.state != "newbranch" {
 			switch msg.String() {
 			case "q", "ctrl+c":
+				if m.confirmAction != "" {
+					m.confirmAction = ""
+					m.statusMsg = "❌ Action cancelled"
+					m.statusExpiry = time.Now().Add(2 * time.Second)
+					return m, nil
+				}
 				return m, tea.Quit
 
 			case "1":
@@ -411,6 +517,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "3":
 				m.state = "custom"
 				m.customInput.Focus()
+				return m, nil
+
+			case "4":
+				m.state = "branches"
+				return m, m.loadBranches()
+
+			case "5":
+				m.state = "history"
+				return m, m.loadHistory()
+
+			case "6":
+				m.state = "output"
 				return m, nil
 
 			case "e":
@@ -446,8 +564,63 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "p":
 				return m, m.gitPush()
 
+			case "l":
+				return m, m.gitPull()
+
 			case "s":
 				return m, m.gitStatus()
+
+			case " ": // Space bar
+				if m.state == "files" && len(m.changes) > 0 {
+					selectedIndex := m.filesTable.Cursor()
+					if selectedIndex < len(m.changes) {
+						return m, m.toggleStaging(m.changes[selectedIndex].File)
+					}
+				}
+				return m, nil
+
+			case "v":
+				if m.state == "files" && len(m.changes) > 0 {
+					selectedIndex := m.filesTable.Cursor()
+					if selectedIndex < len(m.changes) {
+						return m, m.viewDiff(m.changes[selectedIndex].File)
+					}
+				}
+				return m, nil
+
+			case "n":
+				if m.state == "branches" {
+					m.state = "newbranch"
+					m.branchInput.Focus()
+					return m, nil
+				}
+				return m, nil
+
+			case "d":
+				if m.state == "branches" && len(m.branches) > 0 {
+					selectedIndex := m.branchesTable.Cursor()
+					if selectedIndex < len(m.branches) {
+						branch := m.branches[selectedIndex]
+						if branch.IsCurrent {
+							return m, func() tea.Msg {
+								return statusMsg{message: "❌ Cannot delete current branch"}
+							}
+						}
+						m.confirmAction = "delete-branch:" + branch.Name
+						return m, func() tea.Msg {
+							return statusMsg{message: fmt.Sprintf("⚠️ Press 'y' to confirm delete branch '%s', or 'q' to cancel", branch.Name)}
+						}
+					}
+				}
+				return m, nil
+
+			case "y":
+				if strings.HasPrefix(m.confirmAction, "delete-branch:") {
+					branchName := strings.TrimPrefix(m.confirmAction, "delete-branch:")
+					m.confirmAction = ""
+					return m, m.deleteBranch(branchName)
+				}
+				return m, nil
 
 			case "R":
 				// Git reset (unstage all) - reset timer to ensure immediate refresh
@@ -465,9 +638,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.refreshAfterCommit(),
 				)
 
-			case "4":
-				m.state = "output"
-				return m, nil
 
 			case "h":
 				return m, m.generateCommitHook()
@@ -497,8 +667,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.customInput, cmd = m.customInput.Update(msg)
 	case "edit":
 		m.editInput, cmd = m.editInput.Update(msg)
-	case "output":
-		// Output view doesn't need input handling
+	case "branches":
+		m.branchesTable, cmd = m.branchesTable.Update(msg)
+	case "newbranch":
+		m.branchInput, cmd = m.branchInput.Update(msg)
+	case "history":
+		m.historyTable, cmd = m.historyTable.Update(msg)
+	case "output", "diff":
+		// Output/diff view doesn't need input handling
 		break
 	}
 
@@ -523,10 +699,12 @@ func (m model) View() string {
 	gitStatusBar := m.renderGitStatusBar()
 
 	// Create tabs
-	tab1 := m.renderTab("1", "📁 Files", m.state == "files")
+	tab1 := m.renderTab("1", "📁 Files", m.state == "files" || m.state == "diff")
 	tab2 := m.renderTab("2", "💡 Suggestions", m.state == "suggestions")
 	tab3 := m.renderTab("3", "✏️  Custom", m.state == "custom")
-	tab4 := m.renderTab("4", "📤 Output", m.state == "output")
+	tab4 := m.renderTab("4", "🌿 Branches", m.state == "branches" || m.state == "newbranch")
+	tab5 := m.renderTab("5", "📜 History", m.state == "history")
+	tab6 := m.renderTab("6", "📤 Output", m.state == "output")
 
 	// Calculate spacing to keep everything on one line
 	spacer := strings.Repeat(" ", 2)
@@ -541,6 +719,8 @@ func (m model) View() string {
 		tab2,
 		tab3,
 		tab4,
+		tab5,
+		tab6,
 	)
 
 	// Combine header with git status
@@ -583,6 +763,44 @@ func (m model) View() string {
 			Foreground(lipgloss.Color("86")).
 			Render("Edit Commit Message:")
 		content = fmt.Sprintf("%s\n\n%s", inputLabel, m.editInput.View())
+
+	case "branches":
+		if len(m.branches) == 0 {
+			content = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("240")).
+				Render("Loading branches...")
+		} else {
+			content = m.branchesTable.View()
+		}
+
+	case "newbranch":
+		inputLabel := lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("86")).
+			Render("Create New Branch:")
+		content = fmt.Sprintf("%s\n\n%s", inputLabel, m.branchInput.View())
+
+	case "history":
+		if len(m.commits) == 0 {
+			content = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("240")).
+				Render("Loading commit history...")
+		} else {
+			content = m.historyTable.View()
+		}
+
+	case "diff":
+		if m.diffContent != "" {
+			diffLabel := lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("86")).
+				Render("File Diff (press ESC to go back):")
+			content = fmt.Sprintf("%s\n\n%s", diffLabel, m.diffContent)
+		} else {
+			content = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("240")).
+				Render("No diff to display.")
+		}
 
 	case "output":
 		if m.pushOutput != "" {
@@ -639,20 +857,19 @@ func (m model) renderFooter() string {
 	var footer string
 	switch m.state {
 	case "files":
-		footer = fmt.Sprintf("%s: %s %s %s: %s %s %s: %s %s %s: %s %s %s: %s %s %s: %s \n%s %s: %s%s: %s %s %s: %s %s %s: %s ",
-			keyStyle.Render("1-4"), actionStyle.Render("switch"), bulletStyle.Render("•"),
-			keyStyle.Render("↑↓"), actionStyle.Render("navigate"), bulletStyle.Render("•"),
-			keyStyle.Render("r"), actionStyle.Render("refresh"), bulletStyle.Render("•"),
-			keyStyle.Render("a"), actionStyle.Render("add"), bulletStyle.Render("•"),
-			keyStyle.Render("R"), actionStyle.Render("reset"), bulletStyle.Render("•"),
-			keyStyle.Render("A"), actionStyle.Render("amend"),
-			keyStyle.Render("s"), actionStyle.Render("status"), bulletStyle.Render("•"),
+		footer = fmt.Sprintf("%s: %s %s %s: %s %s %s: %s %s %s: %s %s %s: %s\n%s: %s %s %s: %s %s %s: %s %s %s: %s",
+			keyStyle.Render("1-6"), actionStyle.Render("tabs"), bulletStyle.Render("•"),
+			keyStyle.Render("space"), actionStyle.Render("stage/unstage"), bulletStyle.Render("•"),
+			keyStyle.Render("v"), actionStyle.Render("view diff"), bulletStyle.Render("•"),
+			keyStyle.Render("a"), actionStyle.Render("add all"), bulletStyle.Render("•"),
+			keyStyle.Render("r"), actionStyle.Render("refresh"),
+			keyStyle.Render("p/l"), actionStyle.Render("push/pull"), bulletStyle.Render("•"),
+			keyStyle.Render("R/A"), actionStyle.Render("reset/amend"), bulletStyle.Render("•"),
 			keyStyle.Render("h/H"), actionStyle.Render("hooks"), bulletStyle.Render("•"),
-			keyStyle.Render("i/?"), actionStyle.Render("info"), bulletStyle.Render("•"),
 			keyStyle.Render("q"), actionStyle.Render("quit"))
 	case "suggestions":
 		footer = fmt.Sprintf("%s: %s %s %s: %s %s %s: %s %s %s: %s %s %s: %s %s %s: %s\n%s: %s %s %s: %s %s %s: %s",
-			keyStyle.Render("1-4"), actionStyle.Render("switch"), bulletStyle.Render("•"),
+			keyStyle.Render("1-6"), actionStyle.Render("tabs"), bulletStyle.Render("•"),
 			keyStyle.Render("↑↓"), actionStyle.Render("navigate"), bulletStyle.Render("•"),
 			keyStyle.Render("enter"), actionStyle.Render("commit"), bulletStyle.Render("•"),
 			keyStyle.Render("e"), actionStyle.Render("edit"), bulletStyle.Render("•"),
@@ -669,9 +886,28 @@ func (m model) renderFooter() string {
 		footer = fmt.Sprintf("%s: %s %s %s: %s",
 			keyStyle.Render("enter"), actionStyle.Render("commit"), bulletStyle.Render("•"),
 			keyStyle.Render("esc"), actionStyle.Render("back to suggestions"))
+	case "branches":
+		footer = fmt.Sprintf("%s: %s %s %s: %s %s %s: %s %s %s: %s %s %s: %s",
+			keyStyle.Render("1-6"), actionStyle.Render("tabs"), bulletStyle.Render("•"),
+			keyStyle.Render("enter"), actionStyle.Render("switch"), bulletStyle.Render("•"),
+			keyStyle.Render("n"), actionStyle.Render("new branch"), bulletStyle.Render("•"),
+			keyStyle.Render("d"), actionStyle.Render("delete"), bulletStyle.Render("•"),
+			keyStyle.Render("q"), actionStyle.Render("quit"))
+	case "newbranch":
+		footer = fmt.Sprintf("%s: %s %s %s: %s",
+			keyStyle.Render("enter"), actionStyle.Render("create"), bulletStyle.Render("•"),
+			keyStyle.Render("esc"), actionStyle.Render("cancel"))
+	case "history":
+		footer = fmt.Sprintf("%s: %s %s %s: %s",
+			keyStyle.Render("1-6"), actionStyle.Render("tabs"), bulletStyle.Render("•"),
+			keyStyle.Render("q"), actionStyle.Render("quit"))
+	case "diff":
+		footer = fmt.Sprintf("%s: %s %s %s: %s",
+			keyStyle.Render("esc"), actionStyle.Render("back to files"), bulletStyle.Render("•"),
+			keyStyle.Render("q"), actionStyle.Render("quit"))
 	case "output":
 		footer = fmt.Sprintf("%s: %s %s %s: %s",
-			keyStyle.Render("1-4"), actionStyle.Render("switch tabs"), bulletStyle.Render("•"),
+			keyStyle.Render("1-6"), actionStyle.Render("switch tabs"), bulletStyle.Render("•"),
 			keyStyle.Render("q"), actionStyle.Render("quit"))
 	}
 
@@ -1700,24 +1936,58 @@ func determineScope(file string) string {
 }
 
 func getStatusIcon(status string) string {
-	switch status {
-	case "A":
-		return "➕"
-	case "M":
-		return "📝"
-	case "D":
-		return "🗑️"
-	case "R":
-		return "📛"
-	case "C":
-		return "📋"
-	case "U":
-		return "⚠️"
-	case "??":
-		return "❓"
-	default:
-		return "📄"
+	if len(status) < 2 {
+		return "📄 Unknown"
 	}
+
+	staged := status[0]
+	unstaged := status[1]
+
+	// Determine the base action
+	var action string
+	var icon string
+
+	// Check the most significant change (staged takes priority, then unstaged)
+	char := staged
+	if char == ' ' || char == '?' {
+		char = unstaged
+	}
+
+	switch char {
+	case 'A':
+		icon = "➕"
+		action = "Added"
+	case 'M':
+		icon = "📝"
+		action = "Modified"
+	case 'D':
+		icon = "🗑️"
+		action = "Deleted"
+	case 'R':
+		icon = "📛"
+		action = "Renamed"
+	case 'C':
+		icon = "📋"
+		action = "Copied"
+	case '?':
+		icon = "❓"
+		action = "Untracked"
+	default:
+		icon = "📄"
+		action = "Changed"
+	}
+
+	// Determine staging status
+	var stagingStatus string
+	if staged != ' ' && staged != '?' && unstaged != ' ' && unstaged != '?' {
+		stagingStatus = "Both"
+	} else if staged != ' ' && staged != '?' {
+		stagingStatus = "Staged"
+	} else {
+		stagingStatus = "Unstaged"
+	}
+
+	return fmt.Sprintf("%s %s (%s)", icon, action, stagingStatus)
 }
 
 // Commit convention and hook management
@@ -1877,4 +2147,290 @@ func (m *model) adjustTableLayout() {
 		{Title: "Message", Width: availableWidth - 15},
 	}
 	m.suggestionsTable.SetColumns(suggestionsColumns)
+
+	// Adjust branches table columns
+	branchesColumns := []table.Column{
+		{Title: "Current", Width: 8},
+		{Title: "Branch Name", Width: availableWidth - 50},
+		{Title: "Upstream", Width: 35},
+	}
+	m.branchesTable.SetColumns(branchesColumns)
+
+	// Adjust history table columns
+	historyColumns := []table.Column{
+		{Title: "Hash", Width: 10},
+		{Title: "Message", Width: availableWidth - 50},
+		{Title: "Author", Width: 20},
+		{Title: "Date", Width: 15},
+	}
+	m.historyTable.SetColumns(historyColumns)
+}
+
+// Branch management functions
+func (m model) loadBranches() tea.Cmd {
+	return func() tea.Msg {
+		cmd := exec.Command("git", "branch", "-vv")
+		cmd.Dir = m.repoPath
+		output, err := cmd.Output()
+		if err != nil {
+			return statusMsg{message: fmt.Sprintf("❌ Failed to load branches: %v", err)}
+		}
+
+		var branches []Branch
+		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+		for _, line := range lines {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+
+			isCurrent := strings.HasPrefix(line, "*")
+			line = strings.TrimPrefix(line, "*")
+			line = strings.TrimSpace(line)
+
+			parts := strings.Fields(line)
+			if len(parts) == 0 {
+				continue
+			}
+
+			branch := Branch{
+				Name:      parts[0],
+				IsCurrent: isCurrent,
+			}
+
+			// Extract upstream info if present (appears in brackets)
+			if strings.Contains(line, "[") && strings.Contains(line, "]") {
+				start := strings.Index(line, "[")
+				end := strings.Index(line, "]")
+				if end > start {
+					branch.Upstream = line[start+1 : end]
+				}
+			}
+
+			branches = append(branches, branch)
+		}
+
+		return branchesMsg(branches)
+	}
+}
+
+func (m model) switchBranch(branchName string) tea.Cmd {
+	return func() tea.Msg {
+		output, err := executeGitCommand(m.repoPath, "checkout", branchName)
+		if err != nil {
+			return statusMsg{message: fmt.Sprintf("❌ Failed to switch branch: %v - %s", err, string(output))}
+		}
+
+		// Reload branches and git status
+		return tea.Batch(
+			m.loadBranches(),
+			m.loadGitStatus(),
+			func() tea.Msg {
+				return statusMsg{message: fmt.Sprintf("✅ Switched to branch '%s'", branchName)}
+			},
+		)()
+	}
+}
+
+func (m model) createBranch(branchName string) tea.Cmd {
+	return func() tea.Msg {
+		output, err := executeGitCommand(m.repoPath, "checkout", "-b", branchName)
+		if err != nil {
+			return statusMsg{message: fmt.Sprintf("❌ Failed to create branch: %v - %s", err, string(output))}
+		}
+
+		// Reload branches and git status
+		return tea.Batch(
+			m.loadBranches(),
+			m.loadGitStatus(),
+			func() tea.Msg {
+				return statusMsg{message: fmt.Sprintf("✅ Created and switched to branch '%s'", branchName)}
+			},
+		)()
+	}
+}
+
+func (m model) deleteBranch(branchName string) tea.Cmd {
+	return func() tea.Msg {
+		output, err := executeGitCommand(m.repoPath, "branch", "-d", branchName)
+		if err != nil {
+			// Try force delete if regular delete fails
+			output, err = executeGitCommand(m.repoPath, "branch", "-D", branchName)
+			if err != nil {
+				return statusMsg{message: fmt.Sprintf("❌ Failed to delete branch: %v - %s", err, string(output))}
+			}
+			return tea.Batch(
+				m.loadBranches(),
+				func() tea.Msg {
+					return statusMsg{message: fmt.Sprintf("✅ Force deleted branch '%s'", branchName)}
+				},
+			)()
+		}
+
+		return tea.Batch(
+			m.loadBranches(),
+			func() tea.Msg {
+				return statusMsg{message: fmt.Sprintf("✅ Deleted branch '%s'", branchName)}
+			},
+		)()
+	}
+}
+
+func (m *model) updateBranchesTable() {
+	var rows []table.Row
+	for _, branch := range m.branches {
+		current := ""
+		if branch.IsCurrent {
+			current = "→"
+		}
+		row := table.Row{
+			current,
+			branch.Name,
+			branch.Upstream,
+		}
+		rows = append(rows, row)
+	}
+	m.branchesTable.SetRows(rows)
+}
+
+// Commit history functions
+func (m model) loadHistory() tea.Cmd {
+	return func() tea.Msg {
+		cmd := exec.Command("git", "log", "--pretty=format:%h|%s|%an|%ar", "-20")
+		cmd.Dir = m.repoPath
+		output, err := cmd.Output()
+		if err != nil {
+			return statusMsg{message: fmt.Sprintf("❌ Failed to load history: %v", err)}
+		}
+
+		var commits []Commit
+		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+		for _, line := range lines {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+
+			parts := strings.Split(line, "|")
+			if len(parts) >= 4 {
+				commit := Commit{
+					Hash:    parts[0],
+					Message: parts[1],
+					Author:  parts[2],
+					Date:    parts[3],
+				}
+				commits = append(commits, commit)
+			}
+		}
+
+		return commitsMsg(commits)
+	}
+}
+
+func (m *model) updateHistoryTable() {
+	var rows []table.Row
+	for _, commit := range m.commits {
+		row := table.Row{
+			commit.Hash,
+			commit.Message,
+			commit.Author,
+			commit.Date,
+		}
+		rows = append(rows, row)
+	}
+	m.historyTable.SetRows(rows)
+}
+
+// File staging functions
+func (m model) toggleStaging(filePath string) tea.Cmd {
+	return func() tea.Msg {
+		// Check if file is staged
+		statusCmd := exec.Command("git", "diff", "--cached", "--name-only")
+		statusCmd.Dir = m.repoPath
+		statusOutput, err := statusCmd.Output()
+		if err != nil {
+			return statusMsg{message: fmt.Sprintf("❌ Failed to check file status: %v", err)}
+		}
+
+		stagedFiles := strings.Split(strings.TrimSpace(string(statusOutput)), "\n")
+		isStaged := false
+		for _, f := range stagedFiles {
+			if strings.TrimSpace(f) == filePath {
+				isStaged = true
+				break
+			}
+		}
+
+		var gitCmd []string
+		var action string
+		if isStaged {
+			gitCmd = []string{"reset", "HEAD", filePath}
+			action = "unstaged"
+		} else {
+			gitCmd = []string{"add", filePath}
+			action = "staged"
+		}
+
+		output, err := executeGitCommand(m.repoPath, gitCmd...)
+		if err != nil {
+			return statusMsg{message: fmt.Sprintf("❌ Failed to %s file: %v - %s", action, err, string(output))}
+		}
+
+		// Reload changes and git status
+		return tea.Batch(
+			m.loadGitChanges(),
+			m.loadGitStatus(),
+			func() tea.Msg {
+				return statusMsg{message: fmt.Sprintf("✅ %s: %s", strings.Title(action), filePath)}
+			},
+		)()
+	}
+}
+
+// Diff viewing functions
+func (m model) viewDiff(filePath string) tea.Cmd {
+	return func() tea.Msg {
+		// Try staged diff first
+		cmd := exec.Command("git", "diff", "--cached", filePath)
+		cmd.Dir = m.repoPath
+		output, err := cmd.Output()
+
+		// If no staged diff, try unstaged
+		if err != nil || len(output) == 0 {
+			cmd = exec.Command("git", "diff", filePath)
+			cmd.Dir = m.repoPath
+			output, err = cmd.Output()
+		}
+
+		if err != nil {
+			return statusMsg{message: fmt.Sprintf("❌ Failed to get diff: %v", err)}
+		}
+
+		if len(output) == 0 {
+			return statusMsg{message: "ℹ️ No changes to display"}
+		}
+
+		return diffMsg(string(output))
+	}
+}
+
+// Pull functionality
+func (m model) gitPull() tea.Cmd {
+	return func() tea.Msg {
+		cmd := exec.Command("git", "pull")
+		cmd.Dir = m.repoPath
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pgid: 0}
+
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return statusMsg{message: fmt.Sprintf("❌ Git pull failed: %v - %s", err, string(output))}
+		}
+
+		// Reload everything after pull
+		return tea.Batch(
+			m.loadGitChanges(),
+			m.loadGitStatus(),
+			func() tea.Msg {
+				return statusMsg{message: fmt.Sprintf("✅ Pull successful: %s", strings.TrimSpace(string(output)))}
+			},
+		)()
+	}
 }

@@ -1,54 +1,86 @@
-# 🚀 Git Commit Helper
+# 🚀 Git Helper
 
-A simple, user-friendly terminal UI for creating git commits with smart suggestions.
+A comprehensive, user-friendly terminal UI for managing your daily git workflow with smart features and intuitive controls.
 
 ## ✨ Features
 
-- **Simple Interface**: Clean, intuitive design with three main modes
-- **Smart Suggestions**: Analyzes git diffs, file content, and patterns to suggest contextual commit messages
-- **Function Detection**: Recognizes when you add/modify functions and suggests specific messages
+### Core Git Operations
+- **Individual File Staging**: Stage/unstage files individually with space bar
+- **Smart Commit Suggestions**: AI-powered analysis of git diffs to suggest contextual commit messages
+- **Branch Management**: Create, switch, delete branches with ease
+- **Commit History**: View recent commits with detailed information
+- **Diff Viewer**: View file changes before committing
+- **Pull & Push**: Seamless remote synchronization
+
+### Advanced Features
 - **Conventional Commits**: Automatic formatting using conventional commit standards (type(scope): description)
+- **Function Detection**: Recognizes when you add/modify functions and suggests specific messages
 - **Commit Hook Management**: Install/remove git hooks to enforce commit message validation
-- **Quick Actions**: One-key shortcuts for common git operations
-- **Custom Messages**: Easy custom commit message input with validation
-- **Error Prevention**: Validates workflows and shows helpful error messages
+- **Enhanced Status Display**: Clear indicators showing Staged/Unstaged/Both status for files
+- **Confirmation Dialogs**: Safety checks for destructive operations
+- **Real-time Updates**: Live git status with ahead/behind indicators
 
 ## 🎯 How to Use
 
-### Three Simple Modes:
+### Six Powerful Tabs:
 
 1. **📁 Files Mode** (`1` key)
-   - View all your changed files with status icons
-   - See what's been modified, added, or deleted
-   - Quick overview of your working directory
+   - View all changed files with detailed status (Staged/Unstaged/Both)
+   - `Space` - Toggle stage/unstage individual files
+   - `v` - View diff of selected file
+   - `a` - Stage all files
+   - `R` - Reset all staged files
+   - See file types and suggested scopes
 
 2. **💡 Suggestions Mode** (`2` key)
    - **Combined suggestion** as the first option - intelligently merges all your changes
    - Individual file-specific suggestions based on actual code changes
    - Analyzes git diffs, detects function additions/modifications
-   - Groups related changes for comprehensive commits
    - Follows conventional commit standards (feat, fix, docs, etc.)
-   - Press `Enter` to commit with a suggestion
-   - Press `e` to **edit any suggestion** before committing
+   - `Enter` - Commit with selected suggestion
+   - `e` - Edit suggestion before committing
 
 3. **✏️ Custom Mode** (`3` key)
    - Write your own commit message
-   - Full control over the commit text, within conventional standards.
-   - Press `Enter` to commit
+   - Full control with conventional commit validation
+   - `Enter` - Commit with custom message
+   - `Esc` - Cancel and return
 
-### Quick Actions:
-- `a` - Git add all files
+4. **🌿 Branches Mode** (`4` key)
+   - View all branches with current branch indicator
+   - See upstream tracking information
+   - `Enter` - Switch to selected branch
+   - `n` - Create new branch
+   - `d` - Delete selected branch (with confirmation)
+
+5. **📜 History Mode** (`5` key)
+   - View last 20 commits
+   - See commit hash, message, author, and date
+   - Quick reference for recent work
+
+6. **📤 Output Mode** (`6` key)
+   - View detailed push output
+   - See last commit information
+   - Track what was pushed to remote
+
+### Quick Actions (Available in most modes):
 - `p` - Git push to remote
+- `l` - Git pull from remote
 - `s` - Git status check
 - `r` - Refresh/reload changes
+- `A` - Amend last commit
+- `h` - Install commit validation hook
+- `H` - Remove commit validation hook
+- `i` - Check hook status
+- `?` - Show commit format help
 - `q` - Quit
 
 ### Navigation:
-- `1`, `2`, `3` - Switch between modes
+- `1-6` - Switch between tabs
 - `↑`/`↓` or `j`/`k` - Navigate lists
-- `Enter` - Commit selected suggestion or custom message
-- `e` - Edit selected suggestion (in suggestions mode)
-- `Esc` - Cancel custom input or go back
+- `Enter` - Select/confirm action
+- `Esc` - Cancel or go back
+- `Space` - Toggle file staging (in Files mode)
 
 ## 🎨 Visual Design
 
@@ -58,16 +90,37 @@ The interface maintains a clean, modern look with:
 - Helpful keyboard shortcuts
 - Real-time feedback
 
-## 🚦 Workflow
+## 🚦 Common Workflows
 
+### Quick Commit & Push
 1. Make your code changes
-2. Run `./git-helper`
-3. Review files in mode 1
-4. Check suggestions in mode 2, or write custom in mode 3
-5. Commit with `Enter`
-6. Optionally push with `p`
+2. Run `git-helper`
+3. Press `a` to stage all files (or `Space` on individual files in tab 1)
+4. Press `2` to see suggestions, select one with `Enter`
+5. Press `p` to push
+6. Done! 🎉
 
-Simple as that! No complex navigation or confusing options.
+### Branch & Feature Work
+1. Run `git-helper`
+2. Press `4` to go to Branches
+3. Press `n` to create a new feature branch
+4. Make your changes
+5. Stage, commit, and push as above
+6. Switch back to main with `4` → `Enter`
+
+### Review Before Commit
+1. Run `git-helper`
+2. Press `Space` on files to stage them individually
+3. Press `v` on files to view their diffs
+4. Verify changes look correct
+5. Press `2` for suggestions or `3` for custom message
+6. Commit and push
+
+### Pull Latest Changes
+1. Run `git-helper`
+2. Press `l` to pull from remote
+3. Review any new changes
+4. Continue your work
 
 ## 📦 Installation
 
