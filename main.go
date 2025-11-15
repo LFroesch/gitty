@@ -806,6 +806,12 @@ func (m model) handleWorkspaceKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.gitReset(), m.refreshAfterStaging())
 	}
 
+	// DEBUG: Log what key we're passing to table
+	if msg.String() == "up" || msg.String() == "down" {
+		m.statusMsg = fmt.Sprintf("DEBUG: Passing %s to filesTable", msg.String())
+		m.statusExpiry = time.Now().Add(1 * time.Second)
+	}
+
 	// Pass unhandled keys to the table for navigation
 	var cmd tea.Cmd
 	m.filesTable, cmd = m.filesTable.Update(msg)
