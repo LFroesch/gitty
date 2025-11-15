@@ -336,8 +336,7 @@ func createBranchesTable() table.Model {
 
 func createToolsTable() table.Model {
 	columns := []table.Column{
-		{Title: "#", Width: 5},
-		{Title: "Tool", Width: 25},
+		{Title: "Tool", Width: 30},
 		{Title: "Description", Width: 50},
 	}
 
@@ -980,14 +979,12 @@ func (m model) handleToolsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) handleToolsMenuKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "1", "enter":
-		if m.toolsTable.Cursor() == 0 || msg.String() == "1" {
+	// Only use Enter to select (no number keys - they conflict with tab switching)
+	if msg.String() == "enter" {
+		switch m.toolsTable.Cursor() {
+		case 0:
 			m.toolMode = "undo"
 			return m, nil
-		}
-		// Handle other menu items based on cursor
-		switch m.toolsTable.Cursor() {
 		case 1:
 			m.toolMode = "rebase"
 			m.rebaseInput.Focus()
@@ -999,20 +996,6 @@ func (m model) handleToolsMenuKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.toolMode = "remote"
 			return m, nil
 		}
-		return m, nil
-
-	case "2":
-		m.toolMode = "rebase"
-		m.rebaseInput.Focus()
-		return m, nil
-
-	case "3":
-		m.toolMode = "history"
-		return m, m.loadHistory()
-
-	case "4":
-		m.toolMode = "remote"
-		return m, nil
 	}
 
 	return m, nil
@@ -2977,10 +2960,10 @@ func (m *model) updateBranchesTable() {
 
 func (m *model) updateToolsTable() {
 	rows := []table.Row{
-		{"1", "Undo Commits", "Soft/mixed/hard reset to undo commits"},
-		{"2", "Interactive Rebase", "Reorder, squash, or edit commits"},
-		{"3", "Commit History", "View detailed commit log"},
-		{"4", "Remote Operations", "Push, pull, fetch from remote"},
+		{"Undo Commits", "Soft/mixed/hard reset to undo commits"},
+		{"Interactive Rebase", "Reorder, squash, or edit commits"},
+		{"Commit History", "View detailed commit log"},
+		{"Remote Operations", "Push, pull, fetch from remote"},
 	}
 	m.toolsTable.SetRows(rows)
 }
@@ -3618,7 +3601,7 @@ func (m model) renderFooter() string {
 	case "tools":
 		switch m.toolMode {
 		case "menu":
-			help = "1-4=select tool or use arrow keys and enter, esc=back q=quit"
+			help = "↑/↓=navigate enter=select esc=back 1-4=tabs q=quit"
 		case "undo":
 			help = "1-4=undo options esc=back q=quit"
 		case "rebase":
