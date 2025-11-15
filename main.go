@@ -448,7 +448,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, m.createBranch(branchName)
 				}
 			case "custom":
-				if m.customInput.Value() != "" {
+				// Only commit if input is focused and has value
+				if m.customInput.Focused() && m.customInput.Value() != "" {
 					msg := m.customInput.Value()
 					// Clear the input and go back to files mode after commit
 					m.customInput.SetValue("")
@@ -516,7 +517,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			case "3":
 				m.state = "custom"
-				m.customInput.Focus()
+				// Don't auto-focus - let user press Enter to start typing
+				return m, nil
+
+			case "c", "enter":
+				if m.state == "custom" && !m.customInput.Focused() {
+					m.customInput.Focus()
+					return m, nil
+				}
 				return m, nil
 
 			case "4":
@@ -664,7 +672,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "suggestions":
 		m.suggestionsTable, cmd = m.suggestionsTable.Update(msg)
 	case "custom":
-		m.customInput, cmd = m.customInput.Update(msg)
+		// Only update input if it's focused
+		if m.customInput.Focused() {
+			m.customInput, cmd = m.customInput.Update(msg)
+		}
 	case "edit":
 		m.editInput, cmd = m.editInput.Update(msg)
 	case "branches":
@@ -754,8 +765,16 @@ func (m model) View() string {
 		inputLabel := lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("86")).
-			Render("Custom Commit Message:\nValid formats: feat(scope): description | fix: description | docs/test/chore: description")
-		content = fmt.Sprintf("%s\n\n%s", inputLabel, m.customInput.View())
+			Render("Custom Commit Message")
+
+		if !m.customInput.Focused() {
+			instructions := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("240")).
+				Render("Press Enter or 'c' to start typing your commit message\n\nValid formats:\n  feat(scope): description\n  fix: description\n  docs/test/chore: description")
+			content = fmt.Sprintf("%s\n\n%s", inputLabel, instructions)
+		} else {
+			content = fmt.Sprintf("%s\n\n%s", inputLabel, m.customInput.View())
+		}
 
 	case "edit":
 		inputLabel := lipgloss.NewStyle().
@@ -795,7 +814,8 @@ func (m model) View() string {
 				Bold(true).
 				Foreground(lipgloss.Color("86")).
 				Render("File Diff (press ESC to go back):")
-			content = fmt.Sprintf("%s\n\n%s", diffLabel, m.diffContent)
+			coloredDiff := colorizeGitDiff(m.diffContent)
+			content = fmt.Sprintf("%s\n\n%s", diffLabel, coloredDiff)
 		} else {
 			content = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("240")).
@@ -879,9 +899,15 @@ func (m model) renderFooter() string {
 			keyStyle.Render("i/?"), actionStyle.Render("info"), bulletStyle.Render("•"),
 			keyStyle.Render("q"), actionStyle.Render("quit"))
 	case "custom":
-		footer = fmt.Sprintf("%s: %s %s %s: %s",
-			keyStyle.Render("enter"), actionStyle.Render("commit"), bulletStyle.Render("•"),
-			keyStyle.Render("esc"), actionStyle.Render("cancel"))
+		if m.customInput.Focused() {
+			footer = fmt.Sprintf("%s: %s %s %s: %s",
+				keyStyle.Render("enter"), actionStyle.Render("commit"), bulletStyle.Render("•"),
+				keyStyle.Render("esc"), actionStyle.Render("cancel"))
+		} else {
+			footer = fmt.Sprintf("%s: %s %s %s: %s",
+				keyStyle.Render("enter/c"), actionStyle.Render("start typing"), bulletStyle.Render("•"),
+				keyStyle.Render("1-6"), actionStyle.Render("switch tabs"))
+		}
 	case "edit":
 		footer = fmt.Sprintf("%s: %s %s %s: %s",
 			keyStyle.Render("enter"), actionStyle.Render("commit"), bulletStyle.Render("•"),
@@ -1303,25 +1329,25 @@ func analyzeChangesForCommits(changes []GitChange) []CommitSuggestion {
 	}
 
 	// Create combined suggestion as first option
-	combinedSuggestion := generateCombinedSuggestion(individualSuggestions, nil)
+	combinedSuggestion := generateCombinedSuggestion(individualSuggestions, changes)
 	if combinedSuggestion.Message != "" {
 		suggestions = append(suggestions, combinedSuggestion)
 	}
 
-	// Only add individual suggestions if there are 3 or fewer files
-	if len(individualSuggestions) <= 3 {
+	// Add individual suggestions if there are 5 or fewer files
+	if len(individualSuggestions) <= 5 {
 		suggestions = append(suggestions, individualSuggestions...)
 	}
 
-	// Limit to max 5 suggestions total
-	if len(suggestions) > 5 {
-		suggestions = suggestions[:5]
+	// Limit to max 8 suggestions total
+	if len(suggestions) > 8 {
+		suggestions = suggestions[:8]
 	}
 
 	return suggestions
 }
 
-func generateCombinedSuggestion(individual []CommitSuggestion, grouped []CommitSuggestion) CommitSuggestion {
+func generateCombinedSuggestion(individual []CommitSuggestion, changes []GitChange) CommitSuggestion {
 	if len(individual) == 0 {
 		return CommitSuggestion{}
 	}
@@ -1329,8 +1355,9 @@ func generateCombinedSuggestion(individual []CommitSuggestion, grouped []CommitS
 	// Count types to determine the main focus
 	typeCounts := make(map[string]int)
 	scopeCounts := make(map[string]int)
+	functionNames := []string{}
 
-	for _, suggestion := range individual {
+	for i, suggestion := range individual {
 		typeCounts[suggestion.Type]++
 		// Extract scope from message if formatted conventionally
 		if strings.Contains(suggestion.Message, "(") && strings.Contains(suggestion.Message, "):") {
@@ -1340,6 +1367,12 @@ func generateCombinedSuggestion(individual []CommitSuggestion, grouped []CommitS
 				scope := suggestion.Message[start:end]
 				scopeCounts[scope]++
 			}
+		}
+
+		// Extract function names from messages
+		if i < len(changes) {
+			diffInfo := getFileDiff(changes[i].File)
+			functionNames = append(functionNames, diffInfo.Functions...)
 		}
 	}
 
@@ -1361,36 +1394,55 @@ func generateCombinedSuggestion(individual []CommitSuggestion, grouped []CommitS
 		}
 	}
 
-	// Generate a simple combined message
+	// Generate a smart combined message
 	var description string
 	totalFiles := len(individual)
 
-	if len(typeCounts) == 1 {
-		// All changes are the same type - keep it simple
+	// If we have specific function names and they're reasonable, use them
+	if len(functionNames) > 0 && len(functionNames) <= 3 {
+		if len(functionNames) == 1 {
+			switch mainType {
+			case "feat":
+				description = fmt.Sprintf("add %s", functionNames[0])
+			case "fix":
+				description = fmt.Sprintf("fix %s", functionNames[0])
+			case "refactor":
+				description = fmt.Sprintf("refactor %s", functionNames[0])
+			default:
+				description = fmt.Sprintf("update %s", functionNames[0])
+			}
+		} else {
+			description = fmt.Sprintf("update %s and related functions", functionNames[0])
+		}
+	} else if len(typeCounts) == 1 {
+		// All changes are the same type - be more specific
 		switch mainType {
 		case "feat":
-			description = "add features"
+			if totalFiles == 1 {
+				description = "add new feature"
+			} else {
+				description = fmt.Sprintf("add new features across %d files", totalFiles)
+			}
 		case "fix":
-			description = "fix issues"
+			if totalFiles == 1 {
+				description = "fix bug"
+			} else {
+				description = fmt.Sprintf("fix multiple bugs (%d files)", totalFiles)
+			}
 		case "docs":
-			description = "update docs"
+			description = "update documentation"
 		case "test":
 			description = "update tests"
 		case "chore":
-			description = "update config"
+			description = "update configuration"
 		case "refactor":
 			description = "refactor code"
 		default:
 			description = "update files"
 		}
 	} else {
-		// Mixed types - just use "update" for simplicity
-		description = "update multiple files"
-	}
-
-	// Only add file count if more than 1 file
-	if totalFiles > 1 {
-		description = fmt.Sprintf("%s (%d files)", description, totalFiles)
+		// Mixed types - provide context
+		description = fmt.Sprintf("update %d files with mixed changes", totalFiles)
 	}
 
 	// Use the main scope if it represents majority of changes
@@ -2410,6 +2462,67 @@ func (m model) viewDiff(filePath string) tea.Cmd {
 
 		return diffMsg(string(output))
 	}
+}
+
+// colorizeGitDiff adds color syntax highlighting to git diff output
+func colorizeGitDiff(diff string) string {
+	lines := strings.Split(diff, "\n")
+	var coloredLines []string
+
+	for _, line := range lines {
+		if len(line) == 0 {
+			coloredLines = append(coloredLines, line)
+			continue
+		}
+
+		switch {
+		// File headers (diff --git a/file b/file)
+		case strings.HasPrefix(line, "diff --git"):
+			coloredLines = append(coloredLines, lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("226")).
+				Render(line))
+
+		// File names (--- a/file, +++ b/file)
+		case strings.HasPrefix(line, "---") || strings.HasPrefix(line, "+++"):
+			coloredLines = append(coloredLines, lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("229")).
+				Render(line))
+
+		// Hunk headers (@@ -1,3 +1,4 @@)
+		case strings.HasPrefix(line, "@@"):
+			coloredLines = append(coloredLines, lipgloss.NewStyle().
+				Foreground(lipgloss.Color("39")).
+				Render(line))
+
+		// Deleted lines (start with -)
+		case strings.HasPrefix(line, "-"):
+			coloredLines = append(coloredLines, lipgloss.NewStyle().
+				Foreground(lipgloss.Color("196")).
+				Render(line))
+
+		// Added lines (start with +)
+		case strings.HasPrefix(line, "+"):
+			coloredLines = append(coloredLines, lipgloss.NewStyle().
+				Foreground(lipgloss.Color("46")).
+				Render(line))
+
+		// Index lines
+		case strings.HasPrefix(line, "index "):
+			coloredLines = append(coloredLines, lipgloss.NewStyle().
+				Foreground(lipgloss.Color("240")).
+				Render(line))
+
+		// Default (context lines)
+		default:
+			coloredLines = append(coloredLines, lipgloss.NewStyle().
+				Foreground(lipgloss.Color("252")).
+				Render(line))
+		}
+	}
+
+	return strings.Join(coloredLines, "\n")
 }
 
 // Pull functionality
