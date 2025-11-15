@@ -666,6 +666,15 @@ func (m model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 
+	// Special case: In commit tab, keys 1-9 are for instant commits, NOT tab switching
+	// Let the commit handler process them first
+	if m.tab == "commit" && !m.commitInput.Focused() {
+		key := msg.String()
+		if key >= "1" && key <= "9" {
+			return m.handleCommitKeys(msg)
+		}
+	}
+
 	// Tab switching (1-4) - only when no input is focused
 	if !m.anyInputFocused() {
 		switch msg.String() {
