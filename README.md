@@ -1,150 +1,345 @@
 # 🚀 Git Helper
 
-A comprehensive, user-friendly terminal UI for managing your daily git workflow with smart features and intuitive controls.
+A comprehensive, beautifully designed terminal UI for mastering your daily git workflow with smart commit suggestions and powerful advanced features.
 
-## ✨ Features
+## ✨ What's New in v2.0
 
-### Core Git Operations
-- **Individual File Staging**: Stage/unstage files individually with space bar
-- **Smart Commit Suggestions**: AI-powered analysis of git diffs to suggest contextual commit messages
-- **Branch Management**: Create, switch, delete branches with ease
-- **Commit History**: View recent commits with detailed information
-- **Diff Viewer**: View file changes before committing
-- **Pull & Push**: Seamless remote synchronization
+**Complete UI Redesign** - Clean 4-tab architecture for better workflow
+- **Enhanced Commit Intelligence** - Semantic analysis with keyword detection, variable extraction, and context awareness
+- **Merge Conflict Resolution** - Visual conflict viewer with quick resolution options
+- **Branch Comparison** - See exactly what differs between branches
+- **Undo/Revert Tools** - Safe ways to undo commits (soft, mixed, hard reset, reflog)
+- **Interactive Rebase** - Squash, reorder, reword, drop commits visually
 
-### Advanced Features
-- **Conventional Commits**: Automatic formatting using conventional commit standards (type(scope): description)
-- **Function Detection**: Recognizes when you add/modify functions and suggests specific messages
-- **Commit Hook Management**: Install/remove git hooks to enforce commit message validation
-- **Enhanced Status Display**: Clear indicators showing Staged/Unstaged/Both status for files
-- **Confirmation Dialogs**: Safety checks for destructive operations
-- **Real-time Updates**: Live git status with ahead/behind indicators
+## 🎯 The Four Tabs
 
-## 🎯 How to Use
+### Tab 1: 📁 WORKSPACE
+Your file staging hub with live diff previews
 
-### Six Powerful Tabs:
+**Features:**
+- Individual file staging with space bar
+- Live diff preview panel (toggle with `v`)
+- Auto-detecting merge conflicts
+- Visual conflict resolution when detected
+- Color-coded file status indicators
 
-1. **📁 Files Mode** (`1` key)
-   - View all changed files with detailed status (Staged/Unstaged/Both)
-   - `Space` - Toggle stage/unstage individual files
-   - `v` - View diff of selected file
-   - `a` - Stage all files
-   - `R` - Reset all staged files
-   - See file types and suggested scopes
+**Shortcuts:**
+- `Space` - Stage/unstage selected file
+- `a` - Stage all files
+- `R` - Reset/unstage all files
+- `v` - Toggle diff preview panel
+- `d` - View full diff of selected file
+- `r` - Refresh changes
 
-2. **💡 Suggestions Mode** (`2` key)
-   - **Combined suggestion** as the first option - intelligently merges all your changes
-   - Individual file-specific suggestions based on actual code changes
-   - Analyzes git diffs, detects function additions/modifications
-   - Follows conventional commit standards (feat, fix, docs, etc.)
-   - `Enter` - Commit with selected suggestion
-   - `e` - Edit suggestion before committing
+**Conflict Mode** (auto-activates when conflicts detected):
+- `o` - Accept ours
+- `t` - Accept theirs
+- `b` - Accept both
+- `c` - Continue merge (when all resolved)
 
-3. **✏️ Custom Mode** (`3` key)
-   - Write your own commit message
-   - Full control with conventional commit validation
-   - `Enter` - Commit with custom message
-   - `Esc` - Cancel and return
+---
 
-4. **🌿 Branches Mode** (`4` key)
-   - View all branches with current branch indicator
-   - See upstream tracking information
-   - `Enter` - Switch to selected branch
-   - `n` - Create new branch
-   - `d` - Delete selected branch (with confirmation)
+### Tab 2: 💡 COMMIT
+Unified commit interface combining smart suggestions with custom input
 
-5. **📜 History Mode** (`5` key)
-   - View last 20 commits
-   - See commit hash, message, author, and date
-   - Quick reference for recent work
+**Features:**
+- Up to 9 numbered smart suggestions based on semantic analysis
+- Custom commit message input (always visible)
+- Last 3 commits shown for reference
+- Conventional commit format validation
+- Only accessible when files are staged
 
-6. **📤 Output Mode** (`6` key)
-   - View detailed push output
-   - See last commit information
-   - Track what was pushed to remote
+**How It Works:**
+The app analyzes your changes and detects:
+- Keywords: bug, fix, error, validate, security, optimize, cache
+- Function names in Go, JS, TS, Python, Java, C#
+- Variable names and imports
+- Code comments for context
+- Change patterns (additions, refactors, fixes)
 
-### Quick Actions (Available in most modes):
-- `p` - Git push to remote
-- `l` - Git pull from remote
-- `s` - Git status check
-- `r` - Refresh/reload changes
-- `A` - Amend last commit
-- `h` - Install commit validation hook
-- `H` - Remove commit validation hook
-- `i` - Check hook status
-- `?` - Show commit format help
-- `q` - Quit
+**Shortcuts:**
+- `1-9` - Instantly commit with that numbered suggestion
+- `Enter` or `c` - Type custom message
+- `↑`/`↓` - Navigate suggestions
+- `Space` - Commit with selected suggestion
 
-### Navigation:
-- `1-6` - Switch between tabs
-- `↑`/`↓` or `j`/`k` - Navigate lists
-- `Enter` - Select/confirm action
-- `Esc` - Cancel or go back
-- `Space` - Toggle file staging (in Files mode)
+**Example Suggestions:**
+```
+[1] feat(auth): add validation to userInput
+[2] fix(auth): fix error handling in processPayment
+[3] refactor(api): optimize database query performance
+```
 
-## 🎨 Visual Design
+---
 
-The interface maintains a clean, modern look with:
-- Intuitive icons and colors
-- Clear status messages
-- Helpful keyboard shortcuts
-- Real-time feedback
+### Tab 3: 🌿 BRANCHES
+Complete branch management with comparison tools
+
+**Features:**
+- View all branches with current indicator
+- See ahead/behind counts for each branch
+- Compare current branch with main/master
+- Create, switch, delete branches
+- Safe delete with confirmations
+
+**Shortcuts:**
+- `Enter` - Switch to selected branch
+- `n` - Create new branch
+- `d` - Delete branch (with confirmation)
+- `c` - Compare with main/master
+- `r` - Refresh branches
+- `y` - Confirm deletion
+
+**Branch Comparison:**
+Shows three sections when comparing:
+1. **Commits Ahead** - Commits on your branch not in target
+2. **Commits Behind** - Commits in target not on your branch
+3. **Differing Files** - All files changed between branches
+
+---
+
+### Tab 4: 🛠️ TOOLS
+Advanced operations menu (press 1-4 to select)
+
+#### 1. Undo/Revert
+Safe ways to undo commits:
+- `1` - Soft reset (undo commit, keep changes staged)
+- `2` - Mixed reset (undo commit, unstage changes)
+- `3` - Hard reset (undo commit, DISCARD changes) ⚠️
+- `4` - View reflog (recover lost work)
+- `y` - Confirm action after selecting
+
+#### 2. Interactive Rebase
+Rewrite commit history visually:
+- Enter number of commits to rebase
+- Navigate commits with ↑/↓
+- Press action keys to change each commit:
+  - `p` - Pick (use commit as-is)
+  - `s` - Squash (combine with previous)
+  - `r` - Reword (change message)
+  - `d` - Drop (remove commit)
+  - `f` - Fixup (squash, discard message)
+- `Enter` - Execute rebase plan
+- `y` - Confirm execution
+
+#### 3. History & Reflog
+Enhanced commit history:
+- View last 20 commits
+- Full hash, message, author, date
+- `r` - Refresh history
+- `c` - Copy hash to clipboard
+
+#### 4. Remote Operations
+Push/pull with detailed output:
+- `p` - Git push
+- `l` - Git pull
+- `f` - Git fetch
+- See detailed results and last commit info
+
+---
 
 ## 🚦 Common Workflows
 
 ### Quick Commit & Push
-1. Make your code changes
-2. Run `git-helper`
-3. Press `a` to stage all files (or `Space` on individual files in tab 1)
-4. Press `2` to see suggestions, select one with `Enter`
-5. Press `p` to push
-6. Done! 🎉
+```
+1. Make code changes
+2. Run git-helper
+3. Press 'a' to stage all (or Space on individual files)
+4. Press '2' to see smart suggestions
+5. Press '1' to commit with first suggestion (or type custom)
+6. Tools > Remote > 'p' to push
+```
 
-### Branch & Feature Work
-1. Run `git-helper`
-2. Press `4` to go to Branches
-3. Press `n` to create a new feature branch
-4. Make your changes
-5. Stage, commit, and push as above
-6. Switch back to main with `4` → `Enter`
+### Branch Feature Work
+```
+1. Tab 3 > 'n' > create feature branch
+2. Make changes
+3. Tab 1 > stage files
+4. Tab 2 > commit with smart suggestion
+5. Tab 4 > Remote > 'p' to push
+6. Tab 3 > Switch back to main
+```
 
-### Review Before Commit
-1. Run `git-helper`
-2. Press `Space` on files to stage them individually
-3. Press `v` on files to view their diffs
-4. Verify changes look correct
-5. Press `2` for suggestions or `3` for custom message
-6. Commit and push
+### Review & Compare
+```
+1. Tab 3 > 'c' to compare with main
+2. Review ahead/behind commits
+3. Check differing files
+4. Tab 1 > review your changes with diff preview
+5. Commit when ready
+```
 
-### Pull Latest Changes
-1. Run `git-helper`
-2. Press `l` to pull from remote
-3. Review any new changes
-4. Continue your work
+### Fix Mistake with Undo
+```
+1. Oh no, wrong commit!
+2. Tab 4 > Undo/Revert
+3. Press '1' for soft reset (keeps changes)
+4. Press 'y' to confirm
+5. Fix and recommit
+```
+
+### Clean History with Rebase
+```
+1. Tab 4 > Interactive Rebase
+2. Enter "5" for last 5 commits
+3. Press 's' on commits to squash
+4. Press 'r' on commits to reword
+5. Enter to execute, 'y' to confirm
+6. Clean history!
+```
+
+### Resolve Merge Conflicts
+```
+1. Merge causes conflicts
+2. git-helper auto-detects, shows Conflicts view
+3. Navigate files with ↑/↓
+4. Press 'o' (ours), 't' (theirs), or 'b' (both)
+5. Repeat for all conflicts
+6. Press 'c' to continue merge
+```
+
+---
+
+## 🎨 Visual Design
+
+**Clean Modern Interface:**
+- Color-coded status bar (branch, staged/unstaged, ahead/behind)
+- Syntax-highlighted diffs (green additions, red deletions)
+- Context-sensitive help in footer
+- Intuitive tab navigation (1-4 keys)
+- Visual feedback for all actions
+
+**Smart Status Indicators:**
+- ✅ Staged
+- 📝 Modified
+- ➕ Added
+- ➖ Deleted
+- ⚡ Both (staged + modified)
+- ⚠️ Conflicts
+
+---
+
+## 🤖 Smart Commit Suggestions
+
+The intelligence engine analyzes your diffs and generates contextual commit messages:
+
+**What It Detects:**
+- **Keywords**: bug, fix, error, validate, auth, security, optimize, cache, api, endpoint
+- **Functions**: Recognizes function additions/changes in multiple languages
+- **Variables**: Extracts meaningful variable names
+- **Comments**: Uses descriptive comments as commit messages
+- **Context**: Classifies changes as fix, validation, API, security, performance
+
+**Examples:**
+
+```diff
++ function validateUserInput(data) {
++   if (!data.email) throw new Error("Invalid email");
++ }
+```
+→ `feat(validation): add validation to userInput`
+
+```diff
+- if (user) {
++ if (user && user.isActive) {
++   // Fix: Check user active status before auth
+```
+→ `fix(auth): fix error handling in authentication`
+
+```diff
++ const cache = new Map();
++ function getCached(key) {
+```
+→ `feat(performance): optimize with caching`
+
+---
 
 ## 📦 Installation
 
-### Global Installation
+### Build & Install Globally
 
-1. Build the application:
-   ```bash
-   go build -o git-helper .
-   ```
+```bash
+# Clone or download
+cd git-helper
 
-2. Install to your local bin directory:
-   ```bash
-   cp git-helper ~/.local/bin/
-   ```
+# Build
+go build -o git-helper .
 
-3. Make sure `~/.local/bin` is in your PATH (add to your shell config if needed):
-   ```bash
-   export PATH="$HOME/.local/bin:$PATH"
-   ```
+# Install to local bin
+cp git-helper ~/.local/bin/
 
-4. Now you can use `git-helper` from any git repository!
+# Add to PATH (if not already)
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+```
 
 ### Usage
-Simply run from any git repository:
+
+Run from any git repository:
 ```bash
 git-helper
 ```
+
+---
+
+## 🎓 Pro Tips
+
+1. **Use number keys in Commit tab** - Pressing 1-9 instantly commits with that suggestion
+2. **Toggle diff preview** - Press 'v' in Workspace to see changes without leaving tab
+3. **Compare before merge** - Tab 3 > 'c' shows exactly what will change
+4. **Reflog is your safety net** - Tools > Undo > View reflog can recover "lost" commits
+5. **Squash WIP commits** - Use interactive rebase to clean up before pushing
+6. **Space bar is your friend** - Stage individual files for atomic commits
+7. **Branch comparison** - See what's different before pulling
+
+---
+
+## 🔧 Configuration
+
+### Git Hooks
+Press `h` in any tab to install a commit message validation hook that enforces conventional commit format.
+
+Press `H` to remove the hook.
+
+Press `i` to check if the hook is installed.
+
+---
+
+## 📝 Conventional Commits
+
+This tool follows the [Conventional Commits](https://www.conventionalcommits.org/) standard:
+
+**Format:** `type(scope): description`
+
+**Types:**
+- `feat` - New feature
+- `fix` - Bug fix
+- `docs` - Documentation only
+- `style` - Code style (formatting, no logic change)
+- `refactor` - Code refactoring
+- `test` - Adding tests
+- `chore` - Maintenance (deps, config, etc.)
+
+**Examples:**
+- `feat(auth): add OAuth2 integration`
+- `fix(api): fix null pointer in user endpoint`
+- `docs(readme): update installation instructions`
+- `refactor(db): optimize query performance`
+
+---
+
+## 🤝 Contributing
+
+Built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea) TUI framework.
+
+Feedback and contributions welcome!
+
+---
+
+## 📜 License
+
+MIT License - feel free to use and modify!
+
+---
+
+**Made for developers who want a better git workflow. Happy committing! 🎉**
