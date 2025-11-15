@@ -130,6 +130,7 @@ type model struct {
 	conflictsTable    table.Model
 	comparisonTable   table.Model
 	rebaseTable       table.Model
+	undoTable         table.Model
 
 	// Inputs
 	commitInput       textinput.Model
@@ -263,6 +264,7 @@ func initialModel() model {
 	m.conflictsTable = createConflictsTable()
 	m.comparisonTable = createComparisonTable()
 	m.rebaseTable = createRebaseTable()
+	m.undoTable = createUndoTable()
 
 	return m
 }
@@ -474,6 +476,43 @@ func createRebaseTable() table.Model {
 	return t
 }
 
+func createUndoTable() table.Model {
+	columns := []table.Column{
+		{Title: "Option", Width: 20},
+		{Title: "Description", Width: 60},
+	}
+
+	t := table.New(
+		table.WithColumns(columns),
+		table.WithFocused(true),
+		table.WithHeight(6),
+	)
+
+	s := table.DefaultStyles()
+	s.Header = s.Header.
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("240")).
+		BorderBottom(true).
+		Bold(false)
+	s.Selected = s.Selected.
+		Foreground(lipgloss.Color("229")).
+		Background(lipgloss.Color("57")).
+		Bold(false)
+
+	t.SetStyles(s)
+
+	// Set the undo options rows
+	rows := []table.Row{
+		{"Soft Reset", "Undo commit, keep changes staged"},
+		{"Mixed Reset", "Undo commit, unstage changes"},
+		{"Hard Reset", "Undo commit, DISCARD all changes (DANGEROUS!)"},
+		{"View Reflog", "See all recent actions"},
+	}
+	t.SetRows(rows)
+
+	return t
+}
+
 // ============================================================================
 // UPDATE
 // ============================================================================
@@ -591,6 +630,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.toolMode {
 		case "menu":
 			m.toolsTable, cmd = m.toolsTable.Update(msg)
+			cmds = append(cmds, cmd)
+		case "undo":
+			m.undoTable, cmd = m.undoTable.Update(msg)
 			cmds = append(cmds, cmd)
 		case "history":
 			m.historyTable, cmd = m.historyTable.Update(msg)
@@ -1014,29 +1056,31 @@ func (m model) handleToolsMenuKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) handleUndoKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "1": // Soft reset (keep changes)
-		m.confirmAction = "soft-reset"
-		m.statusMsg = "⚠️ Press 'y' to undo last commit (keep changes), or ESC to cancel"
-		m.statusExpiry = time.Now().Add(10 * time.Second)
-		return m, nil
+	// Handle enter key based on cursor position
+	if msg.String() == "enter" {
+		switch m.undoTable.Cursor() {
+		case 0: // Soft reset
+			m.confirmAction = "soft-reset"
+			m.statusMsg = "⚠️ Press 'y' to undo last commit (keep changes), or ESC to cancel"
+			m.statusExpiry = time.Now().Add(10 * time.Second)
+			return m, nil
+		case 1: // Mixed reset
+			m.confirmAction = "mixed-reset"
+			m.statusMsg = "⚠️ Press 'y' to undo last commit (unstage changes), or ESC to cancel"
+			m.statusExpiry = time.Now().Add(10 * time.Second)
+			return m, nil
+		case 2: // Hard reset (DANGEROUS)
+			m.confirmAction = "hard-reset"
+			m.statusMsg = "⚠️⚠️⚠️ DANGEROUS: Press 'y' to undo and DISCARD changes, or ESC to cancel"
+			m.statusExpiry = time.Now().Add(15 * time.Second)
+			return m, nil
+		case 3: // View reflog
+			return m, m.loadReflog()
+		}
+	}
 
-	case "2": // Mixed reset (unstage)
-		m.confirmAction = "mixed-reset"
-		m.statusMsg = "⚠️ Press 'y' to undo last commit (unstage changes), or ESC to cancel"
-		m.statusExpiry = time.Now().Add(10 * time.Second)
-		return m, nil
-
-	case "3": // Hard reset (DANGEROUS)
-		m.confirmAction = "hard-reset"
-		m.statusMsg = "⚠️⚠️⚠️ DANGEROUS: Press 'y' to undo and DISCARD changes, or ESC to cancel"
-		m.statusExpiry = time.Now().Add(15 * time.Second)
-		return m, nil
-
-	case "4": // View reflog
-		return m, m.loadReflog()
-
-	case "y": // Confirm action
+	// Handle confirmation
+	if msg.String() == "y" {
 		switch m.confirmAction {
 		case "soft-reset":
 			m.confirmAction = ""
@@ -3384,23 +3428,29 @@ func (m model) renderCommitTab() string {
 		}
 	}
 
-	// Suggestions (numbered 1-9)
+	// Suggestions (use arrow keys to navigate, or 1-9 for instant commit)
 	var suggestionsSection string
 	if len(m.suggestions) > 0 {
 		suggestionsSection = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("86")).
-			Render("\nSuggestions (press 1-9 to commit):")
+			Render("\nSuggestions:")
 
 		for i, suggestion := range m.suggestions {
 			if i >= 9 {
 				break
 			}
+			// Show visual indicator for selected suggestion
+			indicator := "  "
+			if m.selectedSuggestion == i+1 {
+				indicator = "→ "
+			}
+
 			style := suggestionStyle
 			if m.selectedSuggestion == i+1 {
 				style = selectedSuggestionStyle
 			}
-			suggestionsSection += "\n" + style.Render(fmt.Sprintf("  [%d] %s", i+1, suggestion.Message))
+			suggestionsSection += "\n" + style.Render(fmt.Sprintf("%s%s", indicator, suggestion.Message))
 		}
 	}
 
@@ -3500,18 +3550,10 @@ func (m model) renderUndoView() string {
 	header := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color("196")).
+		MarginBottom(1).
 		Render("↩️ Undo Commits")
 
-	options := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240")).
-		Render(`
-[1] Soft Reset  - Undo commit, keep changes staged
-[2] Mixed Reset - Undo commit, unstage changes
-[3] Hard Reset  - Undo commit, DISCARD all changes (DANGEROUS!)
-[4] View Reflog - See all recent actions
-`)
-
-	return lipgloss.JoinVertical(lipgloss.Left, header, options)
+	return lipgloss.JoinVertical(lipgloss.Left, header, "", m.undoTable.View())
 }
 
 func (m model) renderRebaseView() string {
@@ -3584,52 +3626,71 @@ func (m model) renderRemoteView() string {
 	return lipgloss.JoinVertical(lipgloss.Left, header, options)
 }
 
+// formatHelp takes key=description pairs and formats them with colors
+func formatHelp(pairs ...string) string {
+	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Bold(true)
+	descStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	sepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+
+	var parts []string
+	for _, pair := range pairs {
+		// Split on '=' to get key and description
+		split := strings.SplitN(pair, "=", 2)
+		if len(split) == 2 {
+			formatted := keyStyle.Render(split[0]) + sepStyle.Render("=") + descStyle.Render(split[1])
+			parts = append(parts, formatted)
+		} else {
+			// No '=' found, just render as-is
+			parts = append(parts, descStyle.Render(pair))
+		}
+	}
+	return strings.Join(parts, sepStyle.Render("  "))
+}
+
 func (m model) renderFooter() string {
 	var help string
 
 	switch m.tab {
 	case "workspace":
 		if m.viewMode == "conflicts" {
-			help = "o=ours t=theirs b=both c=continue esc=back r=refresh 1-4=tabs q=quit"
+			help = formatHelp("o=ours", "t=theirs", "b=both", "c=continue", "esc=back", "r=refresh", "1-4=tabs", "q=quit")
 		} else if m.viewMode == "diff" {
-			help = "esc=back to files q=quit"
+			help = formatHelp("esc=back to files", "q=quit")
 		} else {
-			help = "space=stage/unstage a=add all r=refresh v=toggle diff d=view diff R=reset 1-4=tabs q=quit"
+			help = formatHelp("space=stage/unstage", "a=add all", "r=refresh", "v=toggle diff", "d=view diff", "R=reset", "1-4=tabs", "q=quit")
 		}
 	case "commit":
 		if m.commitInput.Focused() {
-			help = "enter=commit esc=cancel"
+			help = formatHelp("enter=commit", "esc=cancel")
 		} else {
-			help = "1-9=instant commit ↑/↓=navigate enter/space=commit c=custom 1-4=tabs q=quit"
+			help = formatHelp("1-9=instant commit", "↑/↓=navigate", "enter/space=commit", "c=custom", "1-4=tabs", "q=quit")
 		}
 	case "branches":
 		if m.branchInput.Focused() {
-			help = "enter=create esc=cancel"
+			help = formatHelp("enter=create", "esc=cancel")
 		} else if m.branchComparison != nil {
-			help = "esc=back to branches 1-4=tabs q=quit"
+			help = formatHelp("esc=back to branches", "1-4=tabs", "q=quit")
 		} else {
-			help = "enter=switch n=new d=delete c=compare r=refresh 1-4=tabs q=quit"
+			help = formatHelp("enter=switch", "n=new", "d=delete", "c=compare", "r=refresh", "1-4=tabs", "q=quit")
 		}
 	case "tools":
 		switch m.toolMode {
 		case "menu":
-			help = "↑/↓=navigate enter=select esc=back 1-4=tabs q=quit"
+			help = formatHelp("↑/↓=navigate", "enter=select", "esc=back", "1-4=tabs", "q=quit")
 		case "undo":
-			help = "1-4=undo options esc=back q=quit"
+			help = formatHelp("↑/↓=navigate", "enter=select", "y=confirm", "esc=back", "q=quit")
 		case "rebase":
 			if m.rebaseInput.Focused() {
-				help = "enter=load commits esc=cancel"
+				help = formatHelp("enter=load commits", "esc=cancel")
 			} else {
-				help = "p=pick s=squash r=reword d=drop f=fixup enter=execute esc=back q=quit"
+				help = formatHelp("p=pick", "s=squash", "r=reword", "d=drop", "f=fixup", "enter=execute", "esc=back", "q=quit")
 			}
 		case "history":
-			help = "r=refresh c=copy hash esc=back q=quit"
+			help = formatHelp("r=refresh", "c=copy hash", "esc=back", "q=quit")
 		case "remote":
-			help = "p=push l=pull f=fetch esc=back q=quit"
+			help = formatHelp("p=push", "l=pull", "f=fetch", "esc=back", "q=quit")
 		}
 	}
-
-	helpText := helpStyle.Render(help)
 
 	// Add status message if present
 	if m.statusMsg != "" && time.Now().Before(m.statusExpiry) {
@@ -3637,10 +3698,10 @@ func (m model) renderFooter() string {
 			Foreground(lipgloss.Color("86")).
 			Bold(true).
 			Render("\n" + m.statusMsg)
-		return helpText + statusLine
+		return help + statusLine
 	}
 
-	return helpText
+	return help
 }
 
 // ============================================================================
