@@ -1014,7 +1014,7 @@ func (m model) handleBranchesKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case "y": // Confirm delete or prune
+	case "y": // Confirm delete, prune, or merge
 		if strings.HasPrefix(m.confirmAction, "delete-remote-branch:") {
 			branchName := strings.TrimPrefix(m.confirmAction, "delete-remote-branch:")
 			m.confirmAction = ""
@@ -1024,6 +1024,11 @@ func (m model) handleBranchesKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			branchName := strings.TrimPrefix(m.confirmAction, "delete-branch:")
 			m.confirmAction = ""
 			return m, m.deleteBranch(branchName)
+		}
+		if strings.HasPrefix(m.confirmAction, "merge-branch:") {
+			branchName := strings.TrimPrefix(m.confirmAction, "merge-branch:")
+			m.confirmAction = ""
+			return m, m.mergeBranch(branchName)
 		}
 		if m.confirmAction == "prune-remote" {
 			m.confirmAction = ""
@@ -1047,6 +1052,25 @@ func (m model) handleBranchesKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "f": // Fetch from remote
 		return m, m.gitFetch()
+
+	case "m": // Merge branch into current
+		if len(m.branches) > 0 {
+			selectedIndex := m.branchesTable.Cursor()
+			if selectedIndex < len(m.branches) {
+				branch := m.branches[selectedIndex]
+				if branch.IsCurrent {
+					m.statusMsg = "❌ Cannot merge current branch into itself"
+					m.statusExpiry = time.Now().Add(3 * time.Second)
+					return m, nil
+				}
+				// Get current branch name
+				currentBranch := getBranchName(m.repoPath)
+				m.confirmAction = "merge-branch:" + branch.Name
+				m.statusMsg = fmt.Sprintf("⚠️ Merge '%s' into '%s'? Press 'y' to confirm, ESC to cancel", branch.Name, currentBranch)
+				m.statusExpiry = time.Now().Add(10 * time.Second)
+			}
+		}
+		return m, nil
 
 	case "r": // Refresh branches
 		return m, m.loadBranches()
@@ -2842,6 +2866,50 @@ func (m model) pruneRemoteBranches() tea.Cmd {
 	}
 }
 
+func (m model) mergeBranch(branchName string) tea.Cmd {
+	return func() tea.Msg {
+		// Get current branch name for the success message
+		currentBranch := getBranchName(m.repoPath)
+
+		// For remote branches, strip the "origin/" prefix
+		mergeBranchName := branchName
+		if strings.HasPrefix(branchName, "origin/") {
+			mergeBranchName = strings.TrimPrefix(branchName, "origin/")
+		}
+
+		// Perform the merge
+		output, err := executeGitCommand(m.repoPath, "merge", mergeBranchName, "--no-edit")
+		if err != nil {
+			outputStr := string(output)
+			// Check if it's a merge conflict
+			if strings.Contains(outputStr, "CONFLICT") || strings.Contains(outputStr, "Automatic merge failed") {
+				return tea.Batch(
+					m.loadGitStatus(),
+					func() tea.Msg {
+						return statusMsg{message: fmt.Sprintf("⚠️ Merge conflicts detected! Resolve them in the Workspace tab.")}
+					},
+				)()
+			}
+			return statusMsg{message: fmt.Sprintf("❌ Failed to merge: %v - %s", err, outputStr)}
+		}
+
+		// Check if already up to date
+		outputStr := string(output)
+		if strings.Contains(outputStr, "Already up to date") {
+			return statusMsg{message: fmt.Sprintf("ℹ️ Already up to date with '%s'", branchName)}
+		}
+
+		// Successful merge
+		return tea.Batch(
+			m.loadGitStatus(),
+			m.loadBranches(),
+			func() tea.Msg {
+				return statusMsg{message: fmt.Sprintf("✅ Merged '%s' into '%s'", branchName, currentBranch)}
+			},
+		)()
+	}
+}
+
 // ============================================================================
 // PUSH/PULL OPERATIONS
 // ============================================================================
@@ -3900,7 +3968,7 @@ func (m model) renderFooter() string {
 		} else if m.branchComparison != nil {
 			help = formatHelp("esc=back to branches", "1-4=tabs", "q=quit")
 		} else {
-			help = formatHelp("enter=switch (📡=remote)", "n=new", "d=delete (local/remote)", "p=prune", "c=compare", "f=fetch", "r=refresh", "1-4=tabs", "q=quit")
+			help = formatHelp("enter=switch (📡=remote)", "n=new", "d=delete", "m=merge", "p=prune", "c=compare", "f=fetch", "r=refresh", "1-4=tabs", "q=quit")
 		}
 	case "tools":
 		switch m.toolMode {
