@@ -1000,6 +1000,9 @@ func (m model) handleBranchesKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.loadBranchComparison(targetBranch)
 
+	case "f": // Fetch from remote
+		return m, m.gitFetch()
+
 	case "r": // Refresh branches
 		return m, m.loadBranches()
 	}
@@ -2767,8 +2770,9 @@ func (m model) gitFetch() tea.Cmd {
 
 		return tea.Batch(
 			m.loadGitStatus(),
+			m.loadBranches(),
 			func() tea.Msg {
-				return statusMsg{message: "✅ Fetched latest changes"}
+				return statusMsg{message: "✅ Fetched latest changes from remote"}
 			},
 		)()
 	}
@@ -3749,7 +3753,7 @@ func (m model) renderFooter() string {
 		} else if m.branchComparison != nil {
 			help = formatHelp("esc=back to branches", "1-4=tabs", "q=quit")
 		} else {
-			help = formatHelp("enter=switch (📡=remote)", "n=new", "d=delete", "c=compare", "r=refresh", "1-4=tabs", "q=quit")
+			help = formatHelp("enter=switch (📡=remote)", "n=new", "d=delete", "c=compare", "f=fetch", "r=refresh", "1-4=tabs", "q=quit")
 		}
 	case "tools":
 		switch m.toolMode {

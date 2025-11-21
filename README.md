@@ -89,6 +89,7 @@ Complete branch management with comparison tools
 - `n` - Create new branch
 - `d` - Delete branch (with confirmation)
 - `c` - Compare with main/master
+- `f` - Fetch from remote (sync remote branches)
 - `r` - Refresh branches
 - `y` - Confirm deletion
 
